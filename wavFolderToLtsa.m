@@ -31,10 +31,17 @@ function [ltsa, t, freqs] = wavFolderToLtsa(saveFile, fileInfo, startTime, endTi
 %   clickAmount       Click suppression replacement level. Default: 1000.
 %   saveIncrement     Chunk output into separate files: "none", "daily",
 %                     "monthly", or "yearly". Default: "none".
+%                     When set, calls wavFolderToLtsa recursively once per
+%                     chunk so each chunk gets full parallel throughput.
+%                     Existing chunk files are skipped (incremental).
+%                     Returns empty ltsa/t/freqs -- use catLtsa to combine.
+%   rebuild           When saveIncrement ~= "none", re-compute chunks even
+%                     if the output file already exists. Default: false.
 %   verbose           Print progress to console. Default: true.
 %
 % Outputs:
 %   ltsa    numFreqs x numSlices matrix of PSD values (linear, not dB).
+%           Empty when saveIncrement ~= "none" (use catLtsa to combine).
 %   t       1 x numSlices datenum vector (slice start times).
 %   freqs   numFreqs x 1 frequency vector in Hz.
 %
@@ -61,12 +68,69 @@ arguments
     options.clickAmount        (1,1) double  {mustBePositive}           = 1000
     options.saveIncrement      (1,1) string  {mustBeMember(options.saveIncrement, ...
                                    ["none","daily","monthly","yearly"])} = "none"
+    options.rebuild            (1,1) logical                            = false
     options.verbose            (1,1) logical                            = true
 end
 
-doSave       = strlength(saveFile) > 0;
-doClicks     = isfinite(options.clickThreshold);
-doIncremental = options.saveIncrement ~= "none";
+doSave   = strlength(saveFile) > 0;
+doClicks = isfinite(options.clickThreshold);
+
+% -------------------------------------------------------------------------
+% saveIncrement: thin wrapper -- call recursively once per chunk
+% -------------------------------------------------------------------------
+if options.saveIncrement ~= "none"
+
+    % Build chunk time grid to get freqs (one pwelch call)
+    sampleRate = fileInfo(1).sampleRate;
+    nfft       = 2 ^ nextpow2(sampleRate / options.freqResolution);
+    [~, freqs] = pwelch(zeros(nfft,1), nfft, options.noverlap, nfft, sampleRate);
+
+    % Build chunk boundaries
+    tInc         = options.durationOfAverage / 86400;
+    t_grid       = startTime : tInc : endTime;
+    chunkBounds  = buildChunkBounds(t_grid, options.saveIncrement, endTime, tInc);
+    nChunks      = size(chunkBounds, 1);
+
+    if options.verbose
+        fprintf('wavFolderToLtsa: %d %s chunks\n', nChunks, options.saveIncrement);
+    end
+
+    for iChunk = 1:nChunks
+        cStart    = chunkBounds(iChunk, 1);
+        cEnd      = chunkBounds(iChunk, 2);
+        chunkFile = makeChunkFilename(saveFile, cStart, options.saveIncrement);
+
+        if exist(chunkFile, 'file') && ~options.rebuild
+            if options.verbose
+                fprintf('  Skipping existing: %s\n', chunkFile);
+            end
+            continue
+        end
+
+        if options.verbose
+            fprintf('  Chunk %d/%d: %s\n', iChunk, nChunks, ...
+                datestr(cStart, 'yyyy-mm-dd'));
+        end
+
+        % Recursive call -- no saveIncrement, so runs the full computation
+        wavFolderToLtsa(chunkFile, fileInfo, cStart, cEnd, ...
+            durationOfAverage = options.durationOfAverage, ...
+            freqResolution    = options.freqResolution, ...
+            noverlap          = options.noverlap, ...
+            channel           = options.channel, ...
+            exclusions        = options.exclusions, ...
+            parallel          = options.parallel, ...
+            clickThreshold    = options.clickThreshold, ...
+            clickAmount       = options.clickAmount, ...
+            verbose           = options.verbose);
+            % note: saveIncrement intentionally omitted (defaults to "none")
+    end
+
+    % Return empty -- caller should use catLtsa to combine chunk files
+    ltsa = [];
+    t    = [];
+    return
+end
 
 % -------------------------------------------------------------------------
 % Derived FFT parameters
@@ -96,8 +160,8 @@ end
 % -------------------------------------------------------------------------
 % Memory preflight
 % -------------------------------------------------------------------------
-bytesNeeded = numel(freqs) * nSlices * 8;   % double = 8 bytes
-if bytesNeeded > 4e9                        % warn above 4 GB
+bytesNeeded = numel(freqs) * nSlices * 8;
+if bytesNeeded > 4e9
     neededGB = bytesNeeded / 1e9;
     try
         mem    = memory;
@@ -116,150 +180,107 @@ if bytesNeeded > 4e9                        % warn above 4 GB
 end
 
 % -------------------------------------------------------------------------
-% Split into chunks if saveIncrement is set, otherwise run as one chunk
+% Allocate outputs
 % -------------------------------------------------------------------------
-if doIncremental
-    chunkBounds = buildChunkBounds(t, options.saveIncrement, endTime, tInc);
-else
-    chunkBounds = [startTime, endTime];
-end
-nChunks = size(chunkBounds, 1);
-
-% Pre-allocate full outputs (populated chunk by chunk)
 ltsa     = nan(numel(freqs), nSlices);
 errorLog = struct('sliceIdx', {}, 'time', {}, 'message', {}, 'expected', {});
 
 % -------------------------------------------------------------------------
-% Main loop over chunks
+% Progress bar
 % -------------------------------------------------------------------------
-for iChunk = 1:nChunks
+barLen  = min(nSlices, 50);
+progIdx = unique(round(linspace(1, nSlices, barLen)));
 
-    cStart  = chunkBounds(iChunk, 1);
-    cEnd    = chunkBounds(iChunk, 2);
-    cMask   = t >= cStart & t < cEnd;
-    tChunk  = t(cMask);
-    cIdx    = find(cMask);
-    nC      = numel(tChunk);
+if options.verbose
+    fprintf('Starting at %s \n', datestr(now));
+    fprintf('Progress (%d slices)\n', nSlices);
+    fprintf('0|%s|100\n  ', repmat('-', 1, barLen));
+    tStart = tic;
+end
 
-    if nC == 0; continue; end
-
-    ltsaChunk    = nan(numel(freqs), nC);
-    errChunk     = struct('sliceIdx', {}, 'time', {}, 'message', {}, 'expected', {});
-
-    barLen  = min(nC, 50);
-    progIdx = unique(round(linspace(1, nC, barLen)));
-
-    if options.verbose
-        if doIncremental
-            fprintf('\nChunk %d/%d  (%s to %s)\n', iChunk, nChunks, ...
-                datestr(cStart, 'yyyy-mm-dd'), datestr(cEnd, 'yyyy-mm-dd'));
-        end
-        fprintf('Progress (%d slices)\n', nC);
-        fprintf('0|%s|100\n  ', repmat('-', 1, barLen));
-    end
-
-    D = parallel.pool.DataQueue;
-    if options.verbose
-        afterEach(D, @(~) fprintf('#'));
-    end
-
-    % Slice start/end as vectors (avoids broadcasting t into parfor)
-    tSliceStart = tChunk;
-    tSliceEnd   = tChunk + tInc;
-
-    if options.parallel
-        % Ensure pool exists
-        if isempty(gcp('nocreate'))
-            parpool('Processes');
-        end
-
-        % parfor cannot assign to a struct array with dynamic fields, so
-        % collect errors as cell array and convert after
-        errCellMsg      = cell(nC, 1);
-        errCellExpected = false(nC, 1);
-
-        parfor iS = 1:nC
-            [ltsaChunk(:,iS), errCellMsg{iS}, errCellExpected(iS)] = ...
-                computeSlice(fileInfo, tSliceStart(iS), tSliceEnd(iS), ...
-                    nfft, noverlap, sampleRate, ...
-                    options.exclusions, options.channel, ...
-                    doClicks, options.clickThreshold, options.clickAmount); %#ok<PFBNS>
-
-            if any(progIdx == iS)
-                send(D, iS);
-            end
-        end % parfor
-
-        % Collect errors from parfor
-        for iS = 1:nC
-            if ~isempty(errCellMsg{iS})
-                errChunk(end+1) = struct( ...
-                    'sliceIdx', cIdx(iS), ...
-                    'time',     tSliceStart(iS), ...
-                    'message',  errCellMsg{iS}, ...
-                    'expected', errCellExpected(iS)); %#ok<AGROW>
-            end
-        end
-
-    else
-        % Serial path
-        for iS = 1:nC
-            [ltsaChunk(:,iS), msg, isExpected] = ...
-                computeSlice(fileInfo, tSliceStart(iS), tSliceEnd(iS), ...
-                    nfft, noverlap, sampleRate, ...
-                    options.exclusions, options.channel, ...
-                    doClicks, options.clickThreshold, options.clickAmount);
-
-            if ~isempty(msg)
-                errChunk(end+1) = struct( ...
-                    'sliceIdx', cIdx(iS), ...
-                    'time',     tSliceStart(iS), ...
-                    'message',  msg, ...
-                    'expected', isExpected); %#ok<AGROW>
-            end
-
-            if any(progIdx == iS)
-                send(D, iS);
-            end
-        end
-    end
-
-    if options.verbose; fprintf('\n'); end
-
-    % Copy chunk into full arrays
-    ltsa(:, cMask) = ltsaChunk;
-    errorLog       = [errorLog, errChunk]; %#ok<AGROW>
-
-    % Save this chunk if incremental
-    if doSave && doIncremental
-        chunkFile = makeChunkFilename(saveFile, cStart, options.saveIncrement);
-        t_chunk   = tChunk;      %#ok<NASGU> % renamed to avoid shadowing t
-        ltsa_chunk = ltsaChunk;  %#ok<NASGU>
-        errorLog_chunk = errChunk; %#ok<NASGU>
-        save(chunkFile, '-mat', '-v7.3', ...
-            't_chunk', 'ltsa_chunk', 'freqs', 'errorLog_chunk');
-        if options.verbose
-            fprintf('  Saved: %s\n', chunkFile);
-        end
-    end
-
-end % chunk loop
+D = parallel.pool.DataQueue;
+if options.verbose
+    afterEach(D, @(~) fprintf('#'));
+end
 
 % -------------------------------------------------------------------------
-% Final save (non-incremental)
+% Slice start/end vectors
 % -------------------------------------------------------------------------
-if doSave && ~doIncremental
+tSliceStart = t;
+tSliceEnd   = t + tInc;
+
+% -------------------------------------------------------------------------
+% Compute slices
+% -------------------------------------------------------------------------
+if options.parallel
+    if isempty(gcp('nocreate'))
+        parpool('Threads');
+    end
+
+    errCellMsg      = cell(nSlices, 1);
+    errCellExpected = false(nSlices, 1);
+
+    parfor iS = 1:nSlices
+        [ltsa(:,iS), errCellMsg{iS}, errCellExpected(iS)] = ...
+            computeSlice(fileInfo, tSliceStart(iS), tSliceEnd(iS), ...
+                nfft, noverlap, sampleRate, ...
+                options.exclusions, options.channel, ...
+                doClicks, options.clickThreshold, options.clickAmount); %#ok<PFBNS>
+
+        if any(progIdx == iS)
+            send(D, iS);
+        end
+    end
+
+    for iS = 1:nSlices
+        if ~isempty(errCellMsg{iS})
+            errorLog(end+1) = struct( ...
+                'sliceIdx', iS, ...
+                'time',     tSliceStart(iS), ...
+                'message',  errCellMsg{iS}, ...
+                'expected', errCellExpected(iS)); %#ok<AGROW>
+        end
+    end
+
+else
+    for iS = 1:nSlices
+        [ltsa(:,iS), msg, isExpected] = ...
+            computeSlice(fileInfo, tSliceStart(iS), tSliceEnd(iS), ...
+                nfft, noverlap, sampleRate, ...
+                options.exclusions, options.channel, ...
+                doClicks, options.clickThreshold, options.clickAmount);
+
+        if ~isempty(msg)
+            errorLog(end+1) = struct( ...
+                'sliceIdx', iS, ...
+                'time',     tSliceStart(iS), ...
+                'message',  msg, ...
+                'expected', isExpected); %#ok<AGROW>
+        end
+
+        if any(progIdx == iS)
+            send(D, iS);
+        end
+    end
+end
+
+if options.verbose; fprintf('\n'); end
+
+% -------------------------------------------------------------------------
+% Save
+% -------------------------------------------------------------------------
+if doSave
     save(saveFile, 't', 'freqs', 'ltsa', 'errorLog', '-v7.3');
     if options.verbose
-        fprintf('\nSaved: %s\n', saveFile);
+        fprintf('Saved: %s\n', saveFile);
     end
 end
 
 if options.verbose
     nErr      = numel(errorLog);
     nExpected = sum([errorLog.expected]);
-    fprintf('Done at %s  |  %d slices  |  %d skipped (%d unexpected)\n\n', ...
-        datestr(now), nSlices, nErr, nErr - nExpected);
+    fprintf('Done at %s  |  elapsed %.1f s  |  %d slices  |  %d skipped (%d unexpected)\n\n', ...
+        datestr(now), toc(tStart), nSlices, nErr, nErr - nExpected);
 end
 
 end % main function
@@ -281,7 +302,6 @@ try
         exclusions=exclusions, channel=channel, newRate=sampleRate);
 
     if numel(audio) < nfft
-        % Too short — data gap or duty-cycle boundary, expected
         errMsg     = sprintf('audio too short (%d samples, need %d)', numel(audio), nfft);
         isExpected = true;
         return
@@ -295,18 +315,16 @@ try
 
 catch ME
     errMsg     = ME.message;
-    isExpected = false;   % unexpected — caller will log with full message
+    isExpected = false;
 end
 
 end
 
 
 % =========================================================================
-%  Local: build chunk boundary matrix for incremental save
+%  Local: build chunk boundary matrix
 % =========================================================================
 function bounds = buildChunkBounds(t, increment, endTime, tInc)
-% Returns Nx2 datenum matrix of [chunkStart chunkEnd] pairs.
-
 tDT  = datetime(t, 'ConvertFrom', 'datenum');
 tEnd = datetime(endTime, 'ConvertFrom', 'datenum');
 
@@ -316,7 +334,6 @@ switch increment
     case "yearly";  unit = 'year';
 end
 
-% Walk forward through calendar boundaries using dateshift
 chunkStart = dateshift(tDT(1), 'start', unit);
 finalEnd   = dateshift(tEnd,   'end',   unit);
 
@@ -330,19 +347,4 @@ end
 allEnds = [allStarts(2:end), finalEnd];
 
 bounds = [datenum(allStarts(:)), datenum(allEnds(:))];
-end
-
-
-% =========================================================================
-%  Local: construct chunk filename from saveFile stem and chunk start date
-% =========================================================================
-function chunkFile = makeChunkFilename(saveFile, chunkStart, increment)
-[folder, stem, ~] = fileparts(saveFile);
-dt = datetime(chunkStart, 'ConvertFrom', 'datenum');
-switch increment
-    case "daily";   suffix = datestr(dt, 'yyyy-mm-dd');
-    case "monthly"; suffix = datestr(dt, 'yyyy-mm');
-    case "yearly";  suffix = datestr(dt, 'yyyy');
-end
-chunkFile = fullfile(folder, sprintf('%s_%s.mat', stem, suffix));
 end
