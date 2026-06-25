@@ -76,43 +76,33 @@ doSave   = strlength(saveFile) > 0;
 doClicks = isfinite(options.clickThreshold);
 
 % -------------------------------------------------------------------------
-% saveIncrement: thin wrapper -- call recursively once per chunk
+% saveIncrement: work out chunks and filenames, call wavFolderToLtsa each
 % -------------------------------------------------------------------------
 if options.saveIncrement ~= "none"
-
-    % Build chunk time grid to get freqs (one pwelch call)
-    sampleRate = fileInfo(1).sampleRate;
-    nfft       = 2 ^ nextpow2(sampleRate / options.freqResolution);
-    [~, freqs] = pwelch(zeros(nfft,1), nfft, options.noverlap, nfft, sampleRate);
-
-    % Build chunk boundaries
-    tInc         = options.durationOfAverage / 86400;
-    t_grid       = startTime : tInc : endTime;
-    chunkBounds  = buildChunkBounds(t_grid, options.saveIncrement, endTime, tInc);
-    nChunks      = size(chunkBounds, 1);
-
+    tInc        = options.durationOfAverage / 86400;
+    chunkBounds = buildChunkBounds(startTime, options.saveIncrement, endTime, tInc);
+    nChunks     = size(chunkBounds, 1);
+    nfft        = 2 ^ nextpow2(fileInfo(1).sampleRate / options.freqResolution);
+    [~, freqs]  = pwelch(zeros(nfft, 1), nfft, options.noverlap, ...
+                         nfft, fileInfo(1).sampleRate);
+    ltsa = []; t = [];
     if options.verbose
         fprintf('wavFolderToLtsa: %d %s chunks\n', nChunks, options.saveIncrement);
     end
-
     for iChunk = 1:nChunks
         cStart    = chunkBounds(iChunk, 1);
         cEnd      = chunkBounds(iChunk, 2);
         chunkFile = makeChunkFilename(saveFile, cStart, options.saveIncrement);
-
         if exist(chunkFile, 'file') && ~options.rebuild
             if options.verbose
-                fprintf('  Skipping existing: %s\n', chunkFile);
+                fprintf('  Skipping: %s\n', chunkFile);
             end
             continue
         end
-
         if options.verbose
             fprintf('  Chunk %d/%d: %s\n', iChunk, nChunks, ...
                 datestr(cStart, 'yyyy-mm-dd'));
         end
-
-        % Recursive call -- no saveIncrement, so runs the full computation
         wavFolderToLtsa(chunkFile, fileInfo, cStart, cEnd, ...
             durationOfAverage = options.durationOfAverage, ...
             freqResolution    = options.freqResolution, ...
@@ -123,12 +113,12 @@ if options.saveIncrement ~= "none"
             clickThreshold    = options.clickThreshold, ...
             clickAmount       = options.clickAmount, ...
             verbose           = options.verbose);
-            % note: saveIncrement intentionally omitted (defaults to "none")
     end
-
-    % Return empty -- caller should use catLtsa to combine chunk files
-    ltsa = [];
-    t    = [];
+    
+    % Combine and return via catLtsa
+    [ltsa, t, freqs] = catLtsa(saveFile, ...
+        durationOfAverage = options.durationOfAverage, ...
+        verbose           = false);
     return
 end
 
@@ -192,10 +182,8 @@ barLen  = min(nSlices, 50);
 progIdx = unique(round(linspace(1, nSlices, barLen)));
 
 if options.verbose
-    fprintf('Starting at %s \n', datestr(now));
     fprintf('Progress (%d slices)\n', nSlices);
     fprintf('0|%s|100\n  ', repmat('-', 1, barLen));
-    tStart = tic;
 end
 
 D = parallel.pool.DataQueue;
@@ -279,8 +267,8 @@ end
 if options.verbose
     nErr      = numel(errorLog);
     nExpected = sum([errorLog.expected]);
-    fprintf('Done at %s  |  elapsed %.1f s  |  %d slices  |  %d skipped (%d unexpected)\n\n', ...
-        datestr(now), toc(tStart), nSlices, nErr, nErr - nExpected);
+    fprintf('Done at %s  |  %d slices  |  %d skipped (%d unexpected)\n\n', ...
+        datestr(now), nSlices, nErr, nErr - nExpected);
 end
 
 end % main function
@@ -324,27 +312,23 @@ end
 % =========================================================================
 %  Local: build chunk boundary matrix
 % =========================================================================
-function bounds = buildChunkBounds(t, increment, endTime, tInc)
-tDT  = datetime(t, 'ConvertFrom', 'datenum');
-tEnd = datetime(endTime, 'ConvertFrom', 'datenum');
+function bounds = buildChunkBounds(startTime, increment, endTime, tInc)
+tDT  = datetime(startTime, 'ConvertFrom', 'datenum');
+tEnd = datetime(endTime,   'ConvertFrom', 'datenum');
 
 switch increment
-    case "daily";   unit = 'day';
-    case "monthly"; unit = 'month';
-    case "yearly";  unit = 'year';
+    case "daily"
+        allStarts = dateshift(tDT : caldays(1)   : tEnd, 'start', 'day');
+        unit = 'day';
+    case "monthly"
+        allStarts = dateshift(tDT : calmonths(1) : tEnd, 'start', 'month');
+        unit = 'month';
+    case "yearly"
+        allStarts = dateshift(tDT : calyears(1)  : tEnd, 'start', 'year');
+        unit = 'year';
 end
-
-chunkStart = dateshift(tDT(1), 'start', unit);
-finalEnd   = dateshift(tEnd,   'end',   unit);
-
-allStarts = chunkStart;
-cur = chunkStart;
-while true
-    cur = dateshift(cur + days(1), 'start', unit);
-    if cur > finalEnd; break; end
-    allStarts(end+1) = cur; %#ok<AGROW>
-end
-allEnds = [allStarts(2:end), finalEnd];
+allStarts = unique(allStarts);
+allEnds   = [allStarts(2:end), dateshift(tEnd, 'end', unit)];
 
 bounds = [datenum(allStarts(:)), datenum(allEnds(:))];
 end

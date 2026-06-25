@@ -126,20 +126,20 @@ end
 % -------------------------------------------------------------------------
 % Infer durationOfAverage if not supplied
 % -------------------------------------------------------------------------
-tInc_days = options.durationOfAverage / 86400;
 if isnan(options.durationOfAverage)
-    % Infer from median slice spacing in first chunk
     if numel(chunks(1).t) > 1
         tInc_days = median(diff(chunks(1).t));
+        if options.verbose
+            fprintf('  Inferred durationOfAverage: %.0f s\n', tInc_days * 86400);
+        end
     else
         warning('catLtsa:cannotInferDuration', ...
-            'Cannot infer durationOfAverage from single-slice chunk. ' ...
-            'Supply durationOfAverage explicitly.');
+            ['Cannot infer durationOfAverage from single-slice chunk. ' ...
+            'Supply durationOfAverage explicitly.']);
         tInc_days = 1/24;  % fallback: 1 hour
     end
-    if options.verbose
-        fprintf('  Inferred durationOfAverage: %.0f s\n', tInc_days * 86400);
-    end
+else
+    tInc_days = options.durationOfAverage / 86400;
 end
 
 % -------------------------------------------------------------------------
@@ -187,9 +187,8 @@ ltsa = [ltsa_parts{:}];
 t    = [t_parts{:}];
 
 if options.verbose
-    nSentinels = sum(isnan(t));
-    fprintf('catLtsa: %d slices total (%d gap sentinels)\n', ...
-        numel(t), nSentinels);
+    nNanCols = sum(all(isnan(ltsa), 1));
+    fprintf('catLtsa: %d slices total (%d fully NaN columns)\n', numel(t), nNanCols);
 end
 
 % -------------------------------------------------------------------------
@@ -211,6 +210,10 @@ end % main
 function files = globChunkFiles(stem)
 % Uses chunkFilePattern (private) to keep glob patterns in sync with
 % makeChunkFilename conventions.
+
+% Strip .mat extension if present so patterns are built from stem only
+[folder, name, ~] = fileparts(stem);
+stem = fullfile(folder, name);
 
 patterns = chunkFilePattern(stem, "any");
 

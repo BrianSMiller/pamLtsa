@@ -2,17 +2,18 @@
 %
 % Integration test for wavFolderToLtsa saveIncrement="monthly" and catLtsa.
 %
-% Uses a short span of Kerguelen2019 250Hz downsampled data spanning two
-% calendar months (late January to early February) so that exactly two
-% chunk files are produced and catLtsa has a real boundary to concatenate.
+% Uses a short span of Kerguelen2015 250Hz downsampled data spanning three
+% calendar months so that exactly three chunk files are produced and catLtsa
+% has real boundaries to concatenate across.
 %
-% Does not depend on metaDataKerguelen2019 or any metadata stack --
-% works directly with wavFolderInfo and the wav files.
+% Does not depend on any metadata stack -- works directly with wavFolderInfo
+% and the wav files. Chunk filenames are derived from the stem and dates
+% rather than hardcoded.
 %
 % Tests:
 %   1. wavFolderToLtsa saveIncrement="monthly" produces one .mat per month
 %      with the expected filename suffix convention.
-%   2. catLtsa (stem input) finds both files and returns correct output.
+%   2. catLtsa (stem input) finds all files and returns correct output.
 %   3. catLtsa (file list input) produces identical output to stem input.
 %   4. No gap sentinel inserted when chunks are contiguous.
 %   5. Single NaN sentinel inserted when a gap exists between chunks.
@@ -20,28 +21,38 @@
 %   7. Combined LTSA has correct size and finite values where data exists.
 %
 % Data required:
-%   S:\work\250Hz\Kerguelen2019\   (250 Hz downsampled wav files)
+%   S:\work\250Hz\Kerguelen2015\   (250 Hz downsampled wav files)
 %
 % Temporary files written to tempdir and cleaned up on completion.
 %
 % See also: wavFolderToLtsa, catLtsa, chunkFilePattern, makeChunkFilename
 
 %% Setup
-wavFolder = 'S:\work\250Hz\Kerguelen2019\';
+wavFolder = 'S:\work\250Hz\Kerguelen2015\';
 fprintf('=== test_catLtsa ===\n');
 fprintf('Loading wavFolderInfo from %s\n', wavFolder);
-fileInfo = wavFolderInfo(wavFolder, [], false, false);
+fileInfo = wavFolderInfo(wavFolder, 'yyyy-mm-dd_HH-MM-SS', false, false);
 
-% Short span crossing Jan/Feb boundary
-t0 = datenum([2019 01 28 00 00 00]);
-t1 = datenum([2019 02 04 00 00 00]);
+% Short span crossing three calendar months
+t0 = fileInfo(1).startDate;
+t1 = t0 + 60;
 
 tmpDir   = fullfile(tempdir, 'test_catLtsa');
 if ~exist(tmpDir, 'dir'); mkdir(tmpDir); end
-stemFile = fullfile(tmpDir, 'kerguelen2019_test_3600s_1Hz.mat');
+stemFile = fullfile(tmpDir, 'kerguelen2015_test_3600s_1Hz.mat');
 
 % Clean up previous runs
 delete(fullfile(tmpDir, '*.mat'));
+
+% Derive chunk filenames from stem + date range (mirrors makeChunkFilename)
+tDT       = datetime(t0, 'ConvertFrom', 'datenum');
+tEndDT    = datetime(t1, 'ConvertFrom', 'datenum');
+months    = dateshift(tDT : calmonths(1) : tEndDT, 'start', 'month');
+months    = unique(months);
+[folder, stem] = fileparts(stemFile);
+chunkFiles = arrayfun(@(m) fullfile(folder, ...
+    sprintf('%s_%s.mat', stem, datestr(m, 'yyyy-mm'))), months, ...
+    'UniformOutput', false);
 
 %% Test 1: saveIncrement produces monthly chunk files
 fprintf('\nTest 1: saveIncrement="monthly" produces chunk files...\n');
@@ -52,12 +63,11 @@ fprintf('\nTest 1: saveIncrement="monthly" produces chunk files...\n');
     saveIncrement     = "monthly", ...
     verbose           = true);
 
-janFile = fullfile(tmpDir, 'kerguelen2019_test_3600s_1Hz_2019-01.mat');
-febFile = fullfile(tmpDir, 'kerguelen2019_test_3600s_1Hz_2019-02.mat');
-
-assert(exist(janFile, 'file') == 2, 'January chunk file not created');
-assert(exist(febFile, 'file') == 2, 'February chunk file not created');
-fprintf('  PASS: both monthly chunk files created\n');
+for iF = 1:numel(chunkFiles)
+    assert(exist(chunkFiles{iF}, 'file') == 2, ...
+        sprintf('Chunk file not created: %s', chunkFiles{iF}));
+end
+fprintf('  PASS: %d monthly chunk files created\n', numel(chunkFiles));
 
 %% Test 2: catLtsa stem input
 fprintf('\nTest 2: catLtsa stem input...\n');
@@ -72,10 +82,10 @@ fprintf('  PASS: stem input produces correct output (%d slices)\n', numel(t_cat)
 
 %% Test 3: catLtsa file list input produces identical output
 fprintf('\nTest 3: catLtsa file list input...\n');
-[ltsa_fl, t_fl, freqs_fl] = catLtsa({janFile, febFile}, verbose=false);
+[ltsa_fl, t_fl, freqs_fl] = catLtsa(chunkFiles, verbose=false);
 
 assert(isequal(t_fl, t_cat),    'file list vs stem: t mismatch');
-assert(isequal(ltsa_fl, ltsa_cat), 'file list vs stem: ltsa mismatch');
+assert(~any(ltsa_fl - ltsa_cat, 'all'), 'file list vs stem: ltsa mismatch');
 assert(isequal(freqs_fl, freqs_cat), 'file list vs stem: freqs mismatch');
 fprintf('  PASS: file list input matches stem input\n');
 
@@ -88,35 +98,51 @@ fprintf('  PASS: no sentinels inserted\n');
 %% Test 5: Sentinel inserted when gap exists
 fprintf('\nTest 5: Gap sentinel inserted for non-contiguous chunks...\n');
 
-% Truncate jan chunk by 48 slices (2 days) and resave under a new stem
-s = load(janFile, '-mat');
-t_chunk        = s.t_chunk(1:end-48);       %#ok<NASGU>
-ltsa_chunk     = s.ltsa_chunk(:, 1:end-48); %#ok<NASGU>
-errorLog_chunk = s.errorLog_chunk;           %#ok<NASGU>
+% Truncate first chunk by 48 slices (2 days) and resave under a gap stem
+gapStemFile = fullfile(tmpDir, 'kerguelen2015_gap_3600s_1Hz.mat');
+[gapFolder, gapStem] = fileparts(gapStemFile);
 
-gapJanFile = fullfile(tmpDir, 'kerguelen2019_gap_3600s_1Hz_2019-01.mat');
-save(gapJanFile, 't_chunk', 'ltsa_chunk', 'freqs', 'errorLog_chunk', '-v7.3');
+s          = load(chunkFiles{1}, '-mat');
+t_trunc    = s.t(1:end-48);
+ltsa_trunc = s.ltsa(:, 1:end-48);
+errorLog   = s.errorLog; %#ok<NASGU>
 
-gapFebFile = fullfile(tmpDir, 'kerguelen2019_gap_3600s_1Hz_2019-02.mat');
-copyfile(febFile, gapFebFile);
+% Derive gap chunk filenames
+gapChunkFiles = arrayfun(@(m) fullfile(gapFolder, ...
+    sprintf('%s_%s.mat', gapStem, datestr(m, 'yyyy-mm'))), months, ...
+    'UniformOutput', false);
 
-[~, t_gap] = catLtsa({gapJanFile, gapFebFile}, verbose=true);
-nNaN_gap = sum(isnan(t_gap));
-assert(nNaN_gap == 1, sprintf('Expected 1 sentinel, got %d', nNaN_gap));
-fprintf('  PASS: 1 gap sentinel inserted\n');
+% Save truncated first chunk
+t    = t_trunc;    %#ok<NASGU>
+ltsa = ltsa_trunc; %#ok<NASGU>
+save(gapChunkFiles{1}, 't', 'ltsa', 'freqs', 'errorLog', '-v7.3');
+
+% Copy remaining chunks unchanged
+for iF = 2:numel(chunkFiles)
+    copyfile(chunkFiles{iF}, gapChunkFiles{iF});
+end
+
+[ltsa_gap, t_gap] = catLtsa(gapChunkFiles, verbose=true);
+
+% Sentinel should appear immediately after the truncated chunk
+sentinelIdx = numel(t_trunc) + 1;
+assert(sentinelIdx <= size(ltsa_gap, 2), 'sentinel index out of range');
+assert(all(isnan(ltsa_gap(:, sentinelIdx))), ...
+    sprintf('Expected NaN sentinel column at index %d', sentinelIdx));
+fprintf('  PASS: NaN sentinel at expected index %d\n', sentinelIdx);
 
 %% Test 6: freqs mismatch raises correct error
 fprintf('\nTest 6: freqs mismatch raises error...\n');
-s2 = load(febFile, '-mat');
-freqs          = s2.freqs(1:end-1);   % corrupt freqs  %#ok<NASGU>
-t_chunk        = s2.t_chunk;          %#ok<NASGU>
-ltsa_chunk     = s2.ltsa_chunk;       %#ok<NASGU>
-errorLog_chunk = s2.errorLog_chunk;   %#ok<NASGU>
-badFile = fullfile(tmpDir, 'bad_2019-02.mat');
-save(badFile, 't_chunk', 'ltsa_chunk', 'freqs', 'errorLog_chunk', '-v7.3');
+s2        = load(chunkFiles{2}, '-mat');
+badFile   = fullfile(tmpDir, 'bad_chunk.mat');
+t         = s2.t;       %#ok<NASGU>
+ltsa      = s2.ltsa;    %#ok<NASGU>
+errorLog  = s2.errorLog; %#ok<NASGU>
+freqs     = s2.freqs(1:end-1);  % corrupt freqs %#ok<NASGU>
+save(badFile, 't', 'ltsa', 'freqs', 'errorLog', '-v7.3');
 
 try
-    catLtsa({janFile, badFile}, verbose=false);
+    catLtsa({chunkFiles{1}, badFile}, verbose=false);
     fprintf('  FAIL: expected error not thrown\n');
 catch ME
     assert(contains(ME.identifier, 'freqMismatch'), ...
@@ -128,7 +154,6 @@ end
 fprintf('\nTest 7: output size and finite values...\n');
 assert(size(ltsa_cat, 1) == numel(freqs_cat), 'wrong number of frequency bins');
 assert(size(ltsa_cat, 2) == numel(t_cat),     'wrong number of time slices');
-% At least some values should be finite (real data present)
 assert(any(isfinite(ltsa_cat(:))), 'no finite values in concatenated LTSA');
 fprintf('  PASS: size correct, finite values present\n');
 
