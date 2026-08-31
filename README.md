@@ -109,6 +109,27 @@ plotCalibratedLtsa(data);
 
 ---
 
+## Tab completion
+
+`resources/functionSignatures.json` describes the arguments of every
+working top-level function, so the MATLAB editor and command window offer
+argument names, valid choices and file paths on tab.
+
+It works as soon as the repo folder is on the path. No installation step.
+MATLAB reads the file once at startup, so restart MATLAB after editing it.
+
+The file is easy to break without noticing, because MATLAB ignores a
+malformed or stale signatures file silently. Run
+`tests/test_functionSignatures.m` after changing a function's arguments.
+It validates the JSON and checks every argument name against the actual
+declaration.
+
+Scripts (`checkForRecordingGaps`, `makeLtsa`, `xwavToWav`) have no
+arguments to complete and are excluded. `load_LTSA_folder` is excluded
+because it references undefined variables and cannot run.
+
+---
+
 ## Deployment sites
 
 Sites with metadata functions and LTSAs include Casey, Kerguelen,

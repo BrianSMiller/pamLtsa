@@ -68,3 +68,20 @@ then computes the break-even N above which parallel beats serial.
 **Expected result:** Prints recommended `parallelThreshold` and produces a
 worker-sweep plot. Run once after significant hardware changes. Last result
 on SCI-001717 (31 workers): break-even = 62 slices.
+
+---
+
+### `test_functionSignatures.m`
+**Functions:** all functions described in `resources/functionSignatures.json`  
+**Rationale:** Custom tab completion fails silently. MATLAB ignores a
+malformed or stale `functionSignatures.json` with no warning, so a broken
+entry is indistinguishable from no entry at all. This test runs
+`validateFunctionSignaturesJSON` and then cross-checks every argument name
+in the JSON against the actual function declaration, catching the common
+failure mode where a function gains or renames an argument and the
+signatures file is not updated.  
+**Data required:** None. Reads source files only.  
+**Expected result:** All checks `[PASS]`. The coverage check lists the
+deliberate exclusions: `checkForRecordingGaps`, `makeLtsa`, `xwavToWav`
+(scripts, no arguments to complete) and `load_LTSA_folder` (references
+undefined variables, cannot run).
