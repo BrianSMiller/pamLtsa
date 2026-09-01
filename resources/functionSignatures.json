@@ -88,15 +88,28 @@
     ]
   },
 
-  "ltsaToMillidecade": {
+  "ltsaToBands": {
     "outputs": [
-      {"name": "ltsa_hmd",  "purpose": "numBands x numSlices hybrid millidecade PSD matrix"},
-      {"name": "freqTable", "purpose": "numBands x 3 array of [bandStart, bandCenter, bandEnd] in Hz"}
+      {"name": "ltsa_bands", "purpose": "numBands x numSlices band-averaged PSD matrix (linear, Pa^2/Hz)"},
+      {"name": "freqTable",  "purpose": "numBands x 3 array of [bandStart, bandCenter, bandEnd] in Hz"}
     ],
     "inputs": [
-      {"name": "ltsa",       "kind": "required", "type": ["double", "2d"],               "purpose": "numFreqs x numSlices raw PSD matrix (linear)"},
-      {"name": "freqs",      "kind": "required", "type": ["double", "column"],           "purpose": "numFreqs x 1 frequency vector in Hz"},
-      {"name": "sampleRate", "kind": "required", "type": ["double", "scalar", "positive"], "purpose": "Sample rate in Hz; sets Nyquist and band table"}
+      {"name": "ltsa",       "kind": "required", "type": ["double", "2d"],                                              "purpose": "numFreqs x numSlices raw PSD matrix (linear, Pa^2/Hz)"},
+      {"name": "freqs",      "kind": "required", "type": ["double", "column"],                                          "purpose": "numFreqs x 1 frequency vector in Hz"},
+      {"name": "sampleRate", "kind": "required", "type": ["double", "scalar", "positive"],                              "purpose": "Sample rate in Hz; sets Nyquist and band table"},
+      {"name": "bandType",   "kind": "optional", "type": ["choices={'millidecade','decidecade','third-octave','octave'}"], "purpose": "Band format; default millidecade. third-octave is identical to decidecade"}
+    ]
+  },
+
+  "ltsaMean": {
+    "outputs": [
+      {"name": "output", "purpose": "nBands x numel(tOut) matrix, NaN where no input samples fall in the window"}
+    ],
+    "inputs": [
+      {"name": "ltsa_lin",     "kind": "required", "type": ["double", "2d"],                 "purpose": "nBands x nTimes matrix of linear (not dB) values"},
+      {"name": "t",            "kind": "required", "type": ["double", "row"],                "purpose": "1 x nTimes vector of input times (datenum)"},
+      {"name": "tOut",         "kind": "required", "type": ["double", "row"],                "purpose": "1 x nOut vector of output bin centres (datenum)"},
+      {"name": "timeWindow_s", "kind": "required", "type": ["double", "scalar", "positive"], "purpose": "Full window duration in seconds; the window is centred on tOut"}
     ]
   },
 
