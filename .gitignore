@@ -1,3 +1,7 @@
 *.asv
 *.DS_Store
 *.bak
+
+# Transfer artefacts and test scratch output
+*.bundle
+tests/*.mat
