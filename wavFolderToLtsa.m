@@ -18,6 +18,14 @@ function [ltsa, t, freqs] = wavFolderToLtsa(saveFile, fileInfo, startTime, endTi
 %
 % Optional name-value inputs:
 %   durationOfAverage Duration of each LTSA slice in seconds. Default: 3600.
+%   sliceInterval     Time between slice starts in seconds. Default: equal
+%                     to durationOfAverage (contiguous slices). Set larger
+%                     than durationOfAverage to compute a sparse LTSA, e.g.
+%                     1 h slices every 6 h. Slices start at startTime, so
+%                     startTime sets their phase: to centre 1 h slices on
+%                     00, 06, 12 and 18 UTC, start at 23:30 the day before.
+%                     With saveIncrement, each chunk keeps the same phase.
+%                     The default leaves existing behaviour unchanged.
 %   freqResolution    Frequency resolution in Hz. Determines nfft via
 %                     nextpow2(sampleRate/freqResolution). Default: 1.
 %   noverlap          FFT overlap in samples within each Welch estimate.
@@ -59,6 +67,7 @@ arguments
     startTime          (1,1) double
     endTime            (1,1) double
     options.durationOfAverage  (1,1) double  {mustBePositive}           = 3600
+    options.sliceInterval      (1,1) double                             = NaN
     options.freqResolution     (1,1) double  {mustBePositive}           = 1
     options.noverlap           (1,1) double  {mustBeNonnegative}        = 0
     options.channel            (1,1) double  {mustBePositive, mustBeInteger} = 1
@@ -73,6 +82,16 @@ arguments
 end
 
 doSave   = strlength(saveFile) > 0;
+
+if isnan(options.sliceInterval)
+    options.sliceInterval = options.durationOfAverage;
+end
+if options.sliceInterval < options.durationOfAverage
+    error('wavFolderToLtsa:overlappingSlices', ...
+        'sliceInterval (%g s) must not be shorter than durationOfAverage (%g s).', ...
+        options.sliceInterval, options.durationOfAverage);
+end
+tStep = options.sliceInterval / 86400;      % seconds -> days
 doClicks = isfinite(options.clickThreshold);
 
 % -------------------------------------------------------------------------
@@ -92,6 +111,20 @@ if options.saveIncrement ~= "none"
     for iChunk = 1:nChunks
         cStart    = chunkBounds(iChunk, 1);
         cEnd      = chunkBounds(iChunk, 2);
+        if options.sliceInterval ~= options.durationOfAverage
+            % Sparse grid: keep every chunk on the slice grid set by
+            % startTime, so chunk boundaries (midnight, 1st of month) do
+            % not shift the slices. Contiguous runs keep the original
+            % behaviour, where each chunk's grid starts at its boundary.
+            % Each chunk owns the slices that start inside it, so a slice
+            % that straddles the boundary (e.g. 23:30-00:30 at month end)
+            % is extended into the next chunk rather than dropped. The
+            % one second keeps a slice starting exactly on the boundary
+            % in the next chunk only.
+            k      = ceil(round((cStart - startTime) / tStep, 6));
+            cStart = startTime + max(k, 0) * tStep;
+            cEnd   = min(cEnd + (options.durationOfAverage - 1) / 86400, endTime);
+        end
         chunkFile = makeChunkFilename(saveFile, cStart, options.saveIncrement);
         if exist(chunkFile, 'file') && ~options.rebuild
             if options.verbose
@@ -105,6 +138,7 @@ if options.saveIncrement ~= "none"
         end
         wavFolderToLtsa(chunkFile, fileInfo, cStart, cEnd, ...
             durationOfAverage = options.durationOfAverage, ...
+            sliceInterval     = options.sliceInterval, ...
             freqResolution    = options.freqResolution, ...
             noverlap          = options.noverlap, ...
             channel           = options.channel, ...
@@ -116,8 +150,10 @@ if options.saveIncrement ~= "none"
     end
     
     % Combine and return via catLtsa
+    % catLtsa uses durationOfAverage as the expected spacing between
+    % slices when it looks for gaps, so pass the slice interval here
     [ltsa, t, freqs] = catLtsa(saveFile, ...
-        durationOfAverage = options.durationOfAverage, ...
+        durationOfAverage = options.sliceInterval, ...
         verbose           = false);
     return
 end
@@ -135,9 +171,9 @@ noverlap   = options.noverlap;
 % -------------------------------------------------------------------------
 % Build time grid
 % -------------------------------------------------------------------------
-tInc = options.durationOfAverage / 86400;   % seconds -> days
-t    = startTime : tInc : endTime;
-t    = t(1:end-1);                          % slice start times
+tInc = options.durationOfAverage / 86400;   % slice duration, days
+t    = startTime : tStep : endTime;
+t    = t(t + tInc <= endTime + 1e-9);       % slice start times; whole slices only
 nSlices = numel(t);
 
 if nSlices == 0

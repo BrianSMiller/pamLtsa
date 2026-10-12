@@ -13,6 +13,7 @@
       {"name": "startTime",         "kind": "required",  "type": ["double", "scalar"],                                                "purpose": "Start of LTSA time grid (datenum)"},
       {"name": "endTime",           "kind": "required",  "type": ["double", "scalar"],                                                "purpose": "End of LTSA time grid (datenum)"},
       {"name": "durationOfAverage", "kind": "namevalue", "type": ["double", "scalar", "positive"],                                    "purpose": "Slice duration (s); default 3600"},
+      {"name": "sliceInterval",     "kind": "namevalue", "type": ["double", "scalar", "positive"],                                    "purpose": "Time between slice starts (s); default durationOfAverage"},
       {"name": "freqResolution",    "kind": "namevalue", "type": ["double", "scalar", "positive"],                                    "purpose": "Frequency resolution (Hz); default 1"},
       {"name": "noverlap",          "kind": "namevalue", "type": ["double", "scalar", "nonnegative"],                                 "purpose": "Welch FFT overlap in samples; default 0"},
       {"name": "channel",           "kind": "namevalue", "type": ["double", "scalar", "integer", "positive"],                         "purpose": "Audio channel; default 1"},
