@@ -39,7 +39,12 @@ function s = writeSiteDefinitions(m, outFile, options)
 %
 % JSON fields written per site:
 %   siteCode, name, latitude, longitude, lon360, depth_m,
-%   hydrophone_height_above_bottom_m, group, year_first, year_last, elements
+%   hydrophone_height_above_bottom_m, group, year_first, year_last,
+%   date_start, date_end, elements
+%
+% date_start and date_end are the recording start and end dates as
+% ISO 8601 strings (yyyy-mm-dd). The pipeline uses them to pick the
+% seasons each deployment recorded.
 %
 % Missing heights are written as null. The pipeline then uses depth_m.
 %
@@ -89,6 +94,8 @@ for i = 1:numel(m)
     e.group = char(optionalField(d, 'group', options.Group));
     e.year_first = yearOf(d.startDate);
     e.year_last = yearOf(d.endDate);
+    e.date_start = isoDate(d.startDate);
+    e.date_end = isoDate(d.endDate);
     e.elements = cellstr(optionalField(d, 'elements', {d.code}));
     s.(key) = e;
 end
@@ -119,6 +126,14 @@ if ~(isnumeric(v) && isscalar(v) && isfinite(v))
     error('writeSiteDefinitions:badValue', ...
         '%s for "%s" must be a single finite number.', name, key);
 end
+end
+
+function s = isoDate(t)
+% ISO 8601 date string (yyyy-mm-dd) of a datenum or datetime.
+if ~isdatetime(t)
+    t = datetime(t, 'ConvertFrom', 'datenum');
+end
+s = char(string(t, 'yyyy-MM-dd'));
 end
 
 function y = yearOf(t)
