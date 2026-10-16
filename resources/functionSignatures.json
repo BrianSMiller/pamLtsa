@@ -232,6 +232,17 @@
     ]
   },
 
+  "writeSiteDefinitions": {
+    "outputs": [
+      {"name": "s", "purpose": "Struct that was encoded, one field per site"}
+    ],
+    "inputs": [
+      {"name": "m",       "kind": "required",  "type": ["struct"],  "purpose": "Recorder metadata struct array, e.g. from loadRecorderMetaData"},
+      {"name": "outFile", "kind": "required",  "type": ["char", "string"], "purpose": "JSON file to write; \"\" to skip writing"},
+      {"name": "Group",   "kind": "namevalue", "type": ["char", "string"], "purpose": "Group for entries without their own group field; default \"\""}
+    ]
+  },
+
   "plotDeploymentLocations": {
     "inputs": [
       {"name": "siteCode", "kind": "required", "type": ["any"], "purpose": "Site code, group code, or cellstr of codes; requires m_map"}
