@@ -97,7 +97,7 @@ for i = 1:numel(names)
     inNames = cellfun(@(x) string(x.name), inputs);
 
     % Positional inputs, in order
-    jsonPos = inNames(kinds == "required" | kinds == "optional");
+    jsonPos = inNames(kinds == "required" | kinds == "ordered" | kinds == "optional");
     srcPos  = declIn(~ismember(declIn, ["varargin" "options"]));
     if ~isequal(jsonPos(:), srcPos(:))
         fprintf('[FAIL] %s: positional mismatch\n', fn);

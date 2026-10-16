@@ -8,14 +8,14 @@
       {"name": "freqs", "purpose": "numFreqs x 1 frequency vector in Hz"}
     ],
     "inputs": [
-      {"name": "saveFile",          "kind": "required",  "type": ["filepath=*.mat"],                                                  "purpose": "Output .mat file; pass \"\" to skip saving"},
+      {"name": "saveFile",          "kind": "required",  "type": ["file=*.mat"],                                                  "purpose": "Output .mat file; pass \"\" to skip saving"},
       {"name": "fileInfo",          "kind": "required",  "type": ["struct"],                                                          "purpose": "Struct array from wavFolderInfo"},
       {"name": "startTime",         "kind": "required",  "type": ["double", "scalar"],                                                "purpose": "Start of LTSA time grid (datenum)"},
       {"name": "endTime",           "kind": "required",  "type": ["double", "scalar"],                                                "purpose": "End of LTSA time grid (datenum)"},
       {"name": "durationOfAverage", "kind": "namevalue", "type": ["double", "scalar", "positive"],                                    "purpose": "Slice duration (s); default 3600"},
       {"name": "sliceInterval",     "kind": "namevalue", "type": ["double", "scalar", "positive"],                                    "purpose": "Time between slice starts (s); default durationOfAverage"},
       {"name": "freqResolution",    "kind": "namevalue", "type": ["double", "scalar", "positive"],                                    "purpose": "Frequency resolution (Hz); default 1"},
-      {"name": "noverlap",          "kind": "namevalue", "type": ["double", "scalar", "nonnegative"],                                 "purpose": "Welch FFT overlap in samples; default 0"},
+      {"name": "noverlap",          "kind": "namevalue", "type": ["double", "scalar"],                                 "purpose": "Welch FFT overlap in samples; default 0"},
       {"name": "channel",           "kind": "namevalue", "type": ["double", "scalar", "integer", "positive"],                         "purpose": "Audio channel; default 1"},
       {"name": "exclusions",        "kind": "namevalue", "type": ["double", "ncols=2"],                                               "purpose": "Nx2 datenum array of [start end] exclusion periods"},
       {"name": "parallel",          "kind": "namevalue", "type": ["logical", "scalar"],                                               "purpose": "Use parfor for slice computation; default true"},
@@ -36,7 +36,7 @@
     ],
     "inputs": [
       {"name": "source",            "kind": "required",  "type": ["any"],                            "purpose": "Chunk file stem string, or cell array of .mat chunk paths"},
-      {"name": "saveFile",          "kind": "namevalue", "type": ["filepath=*.mat"],                 "purpose": "Path to save combined output; default \"\" (no save)"},
+      {"name": "saveFile",          "kind": "namevalue", "type": ["file=*.mat"],                 "purpose": "Path to save combined output; default \"\" (no save)"},
       {"name": "gapSentinel",       "kind": "namevalue", "type": ["logical", "scalar"],              "purpose": "Insert NaN column at each gap boundary; default true"},
       {"name": "durationOfAverage", "kind": "namevalue", "type": ["double", "scalar"],               "purpose": "Slice duration (s); default inferred from first chunk"},
       {"name": "verbose",           "kind": "namevalue", "type": ["logical", "scalar"],              "purpose": "Print progress; default true"}
@@ -50,7 +50,7 @@
       {"name": "t",     "purpose": "1 x numSlices datenum vector of slice start times"}
     ],
     "inputs": [
-      {"name": "ltsaFile",  "kind": "required", "type": ["filepath=*.mat"],    "purpose": "Saved LTSA .mat file"},
+      {"name": "ltsaFile",  "kind": "required", "type": ["file=*.mat"],    "purpose": "Saved LTSA .mat file"},
       {"name": "startDate", "kind": "required", "type": ["double", "scalar"],  "purpose": "Subset start (datenum), rounded down to the hour"},
       {"name": "endDate",   "kind": "required", "type": ["double", "scalar"],  "purpose": "Subset end (datenum), rounded down to the hour"}
     ]
@@ -98,7 +98,7 @@
       {"name": "ltsa",       "kind": "required", "type": ["double", "2d"],                                              "purpose": "numFreqs x numSlices raw PSD matrix (linear, Pa^2/Hz)"},
       {"name": "freqs",      "kind": "required", "type": ["double", "column"],                                          "purpose": "numFreqs x 1 frequency vector in Hz"},
       {"name": "sampleRate", "kind": "required", "type": ["double", "scalar", "positive"],                              "purpose": "Sample rate in Hz; sets Nyquist and band table"},
-      {"name": "bandType",   "kind": "optional", "type": ["choices={'millidecade','decidecade','third-octave','octave'}"], "purpose": "Band format; default millidecade. third-octave is identical to decidecade"}
+      {"name": "bandType",   "kind": "ordered", "type": ["choices={'millidecade','decidecade','third-octave','octave'}"], "purpose": "Band format; default millidecade. third-octave is identical to decidecade"}
     ]
   },
 
@@ -142,7 +142,7 @@
     ],
     "inputs": [
       {"name": "data",         "kind": "required",  "type": ["struct"],                            "purpose": "Calibrated LTSA struct from loadCalibratedLtsa or attachLtsa"},
-      {"name": "timeStride",   "kind": "optional",  "type": ["double", "scalar", "positive"],      "purpose": "Plot every Nth time slice; default 1"},
+      {"name": "timeStride",   "kind": "ordered",  "type": ["double", "scalar", "positive"],      "purpose": "Plot every Nth time slice; default 1"},
       {"name": "ax",           "kind": "namevalue", "type": ["matlab.graphics.axis.Axes"],         "purpose": "Target axes, e.g. from nexttile; default gca"},
       {"name": "startIx",      "kind": "namevalue", "type": ["double", "scalar", "positive"],      "purpose": "First time index to plot; default 1"},
       {"name": "endIx",        "kind": "namevalue", "type": ["double", "scalar", "positive"],      "purpose": "Last time index to plot; default numel(data.t)"},
@@ -161,8 +161,8 @@
     "inputs": [
       {"name": "f",             "kind": "required", "type": ["double"],             "purpose": "Frequency vector in Hz"},
       {"name": "psd",           "kind": "required", "type": ["double", "2d"],       "purpose": "Calibrated PSD matrix; frequency dimension is matched to f"},
-      {"name": "dBBins",        "kind": "optional", "type": ["double", "vector"],   "purpose": "Level bin edges in dB; default 0:1:160"},
-      {"name": "quantileLines", "kind": "optional", "type": ["logical", "scalar"],  "purpose": "Overlay 5/25/50/75/95th percentile lines; default true"}
+      {"name": "dBBins",        "kind": "ordered", "type": ["double", "vector"],   "purpose": "Level bin edges in dB; default 0:1:160"},
+      {"name": "quantileLines", "kind": "ordered", "type": ["logical", "scalar"],  "purpose": "Overlay 5/25/50/75/95th percentile lines; default true"}
     ]
   },
 
@@ -173,8 +173,8 @@
     ],
     "inputs": [
       {"name": "ltsa",     "kind": "required", "type": ["struct"],                       "purpose": "Calibrated LTSA struct from loadCalibratedLtsa"},
-      {"name": "timeType", "kind": "optional", "type": ["choices={'season','month'}"],   "purpose": "Panel grouping; default season"},
-      {"name": "dBBins",   "kind": "optional", "type": ["double", "vector"],             "purpose": "Level bin edges in dB; default 40:120"}
+      {"name": "timeType", "kind": "ordered", "type": ["choices={'season','month'}"],   "purpose": "Panel grouping; default season"},
+      {"name": "dBBins",   "kind": "ordered", "type": ["double", "vector"],             "purpose": "Level bin edges in dB; default 40:120"}
     ]
   },
 
@@ -219,7 +219,7 @@
     ],
     "inputs": [
       {"name": "m",         "kind": "required", "type": ["struct"],                                        "purpose": "Deployment metadata struct array from loadRecorderMetaData"},
-      {"name": "binMethod", "kind": "optional", "type": ["choices={'year','season','month','week','day'}"], "purpose": "Temporal binning; default year"}
+      {"name": "binMethod", "kind": "ordered", "type": ["choices={'year','season','month','week','day'}"], "purpose": "Temporal binning; default year"}
     ]
   },
 
@@ -228,7 +228,7 @@
       {"name": "data", "purpose": "Deployment metadata struct, or struct array for a group code"}
     ],
     "inputs": [
-      {"name": "code", "kind": "optional", "type": ["any"], "purpose": "Site code, group code ('casey', 'kerguelen', 'all'), or cellstr of codes"}
+      {"name": "code", "kind": "ordered", "type": ["any"], "purpose": "Site code, group code ('casey', 'kerguelen', 'all'), or cellstr of codes"}
     ]
   },
 
